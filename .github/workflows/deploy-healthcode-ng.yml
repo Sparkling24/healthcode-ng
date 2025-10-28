@@ -1,0 +1,93 @@
+name: Build and Push Docker Compose Images
+
+on:
+  push:
+    branches: [ master ]
+# testing automation on feature branches
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Login to Docker Hub
+      run: |
+        echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+
+    - name: Build images with Docker Compose
+      run: docker compose build
+
+    - name: Debug - Show all images
+      run: |
+        echo "=== All Docker images ==="
+        docker images --all
+        echo "=== Docker Compose services ==="
+        docker compose config --services
+
+    - name: Tag and push most recent images
+      run: |
+        SHORT_SHA=$(git rev-parse --short HEAD)
+        USERNAME="${{ secrets.DOCKERHUB_USERNAME }}"
+        
+        # Get the most recently built images (assuming they're the ones we want)
+        recent_images=$(docker images --filter "dangling=false" --format "{{.ID}} {{.Repository}}" | sort -r | head -5)
+        echo "Recent images:"
+        echo "$recent_images"
+        
+        services=$(docker compose config --services)
+        image_count=$(echo "$recent_images" | wc -l)
+        
+        if [ "$image_count" -eq 0 ]; then
+          echo "Error: No images found to push"
+          exit 1
+        fi
+        
+        # If we have the same number of services and images, assume they match in order
+        if [ "$(echo "$services" | wc -l)" -eq "$image_count" ]; then
+          echo "Matching services to images by order..."
+          i=1
+          for service in $services; do
+            image_id=$(echo "$recent_images" | sed -n "${i}p" | awk '{print $1}')
+            echo "Tagging $service with image $image_id"
+            
+            docker tag $image_id $USERNAME/supper-resturant-app-microserevices-$service:$SHORT_SHA
+            docker tag $image_id $USERNAME/supper-resturant-app-microserevices-$service:la-angelatest
+            docker tag $image_id $USERNAME/supper-resturant-app-microservices-$service:$SHORT_SHA
+            docker tag $image_id $USERNAME/supper-resturant-app-microservices-$service:la-angelatest
+            
+            docker push $USERNAME/supper-resturant-app-microserevices-$service:$SHORT_SHA
+            docker push $USERNAME/supper-resturant-app-microserevices-$service:$SHORT_SHA
+            
+          # added custom name for my owned version
+            docker push $USERNAME/supper-resturant-app-microservices-$service:$SHORT_SHA
+            docker push $USERNAME/supper-resturant-app-microservices-$service:$SHORT_SHA
+            
+            i=$((i+1))
+          done
+        else
+          echo "Warning: Number of services and images don't match. Pushing all recent images with generic names."
+          i=1
+          for service in $services; do
+            image_id=$(echo "$recent_images" | sed -n "${i}p" | awk '{print $1}')
+            if [ -n "$image_id" ]; then
+              echo "Tagging $service with image $image_id"
+              
+              docker tag $image_id $USERNAME/supper-resturant-app-microserevices-$service:$SHORT_SHA
+              docker tag $image_id $USERNAME/supper-resturant-app-microserevices-$service:$SHORT_SHA
+              docker tag $image_id $USERNAME/supper-resturant-app-microservices-$service:$SHORT_SHA
+              docker tag $image_id $USERNAME/supper-resturant-app-microservices-$service:$SHORT_SHA
+              
+              docker push $USERNAME/supper-resturant-app-microserevices-$service:$SHORT_SHA
+              docker push $USERNAME/supper-resturant-app-microserevices-$service:$SHORT_SHA
+              docker push $USERNAME/supper-resturant-app-microservices-$service:$SHORT_SHA
+              docker push $USERNAME/supper-resturant-app-microservices-$service:$SHORT_SHA
+              
+              i=$((i+1))
+            fi
+          done
+        fi
